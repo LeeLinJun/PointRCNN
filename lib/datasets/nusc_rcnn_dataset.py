@@ -1,4 +1,5 @@
 import os
+import random
 import numpy as np
 import torch
 from pyquaternion import Quaternion
@@ -8,10 +9,11 @@ from lib.config import cfg
 
 class nuScenesRCNNDataset(nuScenesDataset):
 
-    def __init__(self, dataroot, split, mode, classes='all', verbose=False, npoints=16384, random_select=True,
+    def __init__(self, nusc, split, mode, subset=False, subset_file=None,
+                 subset_fold=4, classes='all', npoints=16384, random_select=True, 
                  logger=None):
         assert mode in ['TRAIN', 'EVAL', 'TEST'], 'Invalid mode: %s' % mode
-        super(nuScenesRCNNDataset, self).__init__(dataroot=dataroot, split=split, verbose=verbose)
+        super(nuScenesRCNNDataset, self).__init__(nusc=nusc, split=split)
         
         self.mode = mode
         if classes == 'all':
@@ -29,27 +31,34 @@ class nuScenesRCNNDataset(nuScenesDataset):
         if not self.random_select:
             self.logger.warning('random select is False')
         
-        if cfg.RPN.ENABLED:
-            self.logger.info('Loading %s samples ... ' % self.mode)
-            if self.mode == 'TRAIN':
-                self.preprocess_rpn_training_data()
-            else:
-                self.logger.info('Done: total %s samples %d' % (self.mode, len(self.sample_tokens)))
-        elif cfg.RCNN.ENABLED:
-            self.preprocess_rpn_training_data()
+        if subset and subset_file is not None:
+            self.logger.info('Loading a %s subset from %s ...' % (self.mode, subset_file))
+            with open(subset_file, 'r') as f:
+                self.sample_tokens = [token.rstrip() for token in f.readlines()]
+            self.logger.info('Done, load a %s subset with %d samples.' % (self.mode, len(self.sample_tokens)))
+                
+        self.preprocess_rpn_training_data()
+        
+        if subset and subset_file is None:
+            self.logger.info('Sampling a %s subset ...' % self.mode)
+            subset_length = int(self.sample_tokens.__len__() / subset_fold)
+            self.sample_tokens = random.sample(self.sample_tokens, subset_length)
+            self.logger.info('Done, sample a %s subset with %d samples.' % (self.mode, len(self.sample_tokens)))
     
     def preprocess_rpn_training_data(self):
         """
         Discard samples which don't have current classes, which will not be used for training.
         Valid sample_token is stored in self.sample_tokens
         """
-        valid_tokens = []
-        for sample_token in self.sample_tokens:
-            sample_ann_infos = self.filterate_anns(self.get_anns(self.nusc.get('sample', sample_token)), add_label=False)
-            if sample_ann_infos.__len__() > 0:
-                valid_tokens.append(sample_token)
-
-        self.logger.info('Done: filter valid %s samples: %d / %d\n' % (self.mode, len(valid_tokens), len(self.sample_tokens)))
+        self.logger.info('Filtering %s samples ... ' % self.mode)
+        valid_tokens = self.sample_tokens
+        if self.mode == 'TRAIN':
+            valid_tokens = []
+            for sample_token in self.sample_tokens:
+                sample_ann_infos = self.filterate_anns(self.get_anns(self.nusc.get('sample', sample_token)), add_label=False)
+                if sample_ann_infos.__len__() > 0:
+                    valid_tokens.append(sample_token)
+        self.logger.info('Done: filter valid %s samples: %d / %d' % (self.mode, len(valid_tokens), len(self.sample_tokens)))
         self.sample_tokens = valid_tokens
         return
     
@@ -119,7 +128,7 @@ class nuScenesRCNNDataset(nuScenesDataset):
                 ann_info['translation'][dim] -= ref_ep_info['translation'][dim]
         return ann_infos
 
-    def filterate_anns(self, ann_infos, min_pts=10, add_label=True):
+    def filterate_anns(self, ann_infos, min_pts=5, add_label=True):
         valid_ann_infos = []
         for ann_info in ann_infos:
             # remove super sparse anns
@@ -197,7 +206,7 @@ class nuScenesRCNNDataset(nuScenesDataset):
         sample_outputs['pts_rect'] = sample_lidar_points.astype(np.float32)
         sample_outputs['pts_features'] = sample_lidar_intensity.astype(np.float32)
         sample_outputs['gt_boxes3d'] = sample_ann_bboxes.astype(np.float32)
-        sample_outputs['gt_labels'] = sample_ann_labels.astype(np.int32)
+        sample_outputs['gt_label'] = sample_ann_labels.astype(np.int32)
 
         if not cfg.RPN.FIXED:
             rpn_cls_label, rpn_reg_label = self.generate_rpn_training_labels(sample_lidar_points, sample_ann_bboxes, sample_ann_labels)
@@ -210,23 +219,28 @@ class nuScenesRCNNDataset(nuScenesDataset):
     def generate_rpn_training_labels(points, bboxes, labels):
         cls_label = np.zeros((points.__len__()))
         reg_label = np.zeros((points.__len__(), 7))
-        corners = kitti_utils.boxes3d_to_corners3d(bboxes)
-        extend_bboxes = kitti_utils.enlarge_box3d(bboxes, extra_width=0.1)
-        extend_corners = kitti_utils.boxes3d_to_corners3d(extend_bboxes)
+        shrink_bboxes = kitti_utils.remove_ground_box3d(bboxes, ground_height=0.05)
+        shrink_corners = kitti_utils.boxes3d_to_corners3d(shrink_bboxes)
+        #extend_bboxes = kitti_utils.enlarge_box3d(bboxes, extra_width=0.05)
+        #extend_corners = kitti_utils.boxes3d_to_corners3d(extend_bboxes)
         for k in range(bboxes.__len__()):
-            box_corners = corners[k]
+            box_corners = shrink_corners[k]
             fg_pt_flag = kitti_utils.in_hull(points, box_corners) # (N,)
             fg_points = points[fg_pt_flag] # (M, 3)
             cls_label[fg_pt_flag] = labels[k] # (N,)
 
             # enlarge the bbox3d, ignore nearby points
-            extend_box_corners = extend_corners[k]
-            fg_enlarge_flag = kitti_utils.in_hull(points, extend_box_corners)
-            ignore_flag = np.logical_xor(fg_pt_flag, fg_enlarge_flag)
-            cls_label[ignore_flag] = -1
+            #extend_box_corners = extend_corners[k]
+            #fg_enlarge_flag = kitti_utils.in_hull(points, extend_box_corners)
+            #ignore_flag = np.logical_xor(fg_pt_flag, fg_enlarge_flag)
+            #cls_label[ignore_flag] = -1
 
             # pixel offset of object center
-            reg_label[fg_pt_flag, :3] = bboxes[k][:3] - fg_points
+            center3d = bboxes[k][:3].copy()  # (x, y, z)
+            center3d[1] -= bboxes[k][3] / 2
+            reg_label[fg_pt_flag, :3] = center3d - fg_points  # Now y is the true center of 3d box 20180928
+
+            # size and angle encoding
             reg_label[fg_pt_flag, 3:] = bboxes[k][3:]
 
         return cls_label, reg_label
@@ -276,26 +290,27 @@ class nuScenesRCNNDataset(nuScenesDataset):
         batch_size = sample_list.__len__()
         ans_dict = {}
 
+        max_gt = -1
         for key in sample_list[0].keys():
             if cfg.RPN.ENABLED and key == 'gt_boxes3d' or \
                     (cfg.RCNN.ENABLED and cfg.RCNN.ROI_SAMPLE_JIT and key in ['gt_boxes3d', 'roi_boxes3d']):
-                max_gt = 0
-                for sample in sample_list:
-                    max_gt = max(max_gt, sample[key].__len__())
+                if max_gt == -1:
+                    for sample in sample_list:
+                        max_gt = max(max_gt, sample[key].__len__())
                 batch_gt_boxes3d = np.zeros((batch_size, max_gt, 7), dtype=np.float32)
                 for i, sample in enumerate(sample_list):
                     batch_gt_boxes3d[i, :sample[key].__len__(), :] = sample[key]
                 ans_dict[key] = batch_gt_boxes3d
                 continue
             
-            if key == 'gt_labels':
-                max_gt = 0
-                for sample in sample_list:
-                    max_gt = max(max_gt, sample[key].__len__())
-                batch_gt_labels = np.zeros((batch_size, max_gt), dtype=np.int32)
+            if key == 'gt_label':
+                if max_gt == -1:
+                    for sample in sample_list:
+                        max_gt = max(max_gt, sample[key].__len__())
+                batch_gt_label = np.zeros((batch_size, max_gt), dtype=np.int32)
                 for i, sample in enumerate(sample_list):
-                    batch_gt_labels[i, :sample[key].__len__()] = sample[key]
-                ans_dict[key] = batch_gt_labels
+                    batch_gt_label[i, :sample[key].__len__()] = sample[key]
+                ans_dict[key] = batch_gt_label
                 continue
 
             if isinstance(sample_list[0][key], np.ndarray):

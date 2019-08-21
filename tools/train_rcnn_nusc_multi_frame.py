@@ -14,7 +14,7 @@ from nuscenes.nuscenes import NuScenes
 
 from lib.net.point_rcnn import PointRCNN
 import lib.net.train_functions as train_functions
-from lib.datasets.nusc_rcnn_dataset import nuScenesRCNNDataset
+from lib.datasets.nusc_rcnn_dataset_multi_frame import nuScenesRCNNDataset
 from lib.config import cfg, cfg_from_file, save_config_to_file
 import tools.train_utils.train_utils as train_utils
 from tools.train_utils.fastai_optim import OptimWrapper
@@ -22,7 +22,7 @@ from tools.train_utils import learning_schedules_fastai as lsf
 
 
 parser = argparse.ArgumentParser(description="arg parser")
-parser.add_argument('--cfg_file', type=str, default='cfgs/nusc.yaml', help='specify the config for training')
+parser.add_argument('--cfg_file', type=str, default='cfgs/nusc_multi_frame.yaml', help='specify the config for training')
 parser.add_argument("--train_mode", type=str, default='rpn', required=True, help="specify the training mode")
 parser.add_argument("--batch_size", type=int, default=16, required=True, help="batch size for training")
 parser.add_argument("--epochs", type=int, default=200, required=True, help="Number of epochs to train for")
@@ -172,7 +172,7 @@ if __name__ == "__main__":
     os.makedirs(backup_dir, exist_ok=True)
     os.system('cp *.py %s/' % backup_dir)
     os.system('cp ../lib/net/*.py %s/' % backup_dir)
-    os.system('cp ../lib/datasets/nusc_rcnn_dataset.py %s/' % backup_dir)
+    os.system('cp ../lib/datasets/nusc_rcnn_dataset_multi_frame.py %s/' % backup_dir)
 
     # tensorboard log
     tb_log = SummaryWriter(log_dir=os.path.join(root_result_dir, 'tensorboard'))

@@ -4,17 +4,16 @@ import copy
 from torch.utils.data import Dataset
 
 # nuScenes API
-from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.splits import train as TRAIN_SCENE_NAMEs
 from nuscenes.utils.splits import val as VAL_SCENE_NAMEs
 from nuscenes.utils.data_classes import LidarPointCloud
 
 class nuScenesDataset(Dataset):
 
-    def __init__(self, dataroot, split, verbose=False):
+    def __init__(self, nusc, split):
         self.split = split
         if self.split in ['train', 'val']:
-            self.nusc = NuScenes(version='v1.0-trainval', dataroot=dataroot, verbose=verbose)
+            self.nusc = nusc
             scene_names = TRAIN_SCENE_NAMEs if self.split == 'train' else VAL_SCENE_NAMEs
         else:
             raise ValueError('Unsupported split type \'{}\''.format(split))
@@ -27,10 +26,6 @@ class nuScenesDataset(Dataset):
                 while sample_info['next'] != '':
                     sample_info = self.nusc.get('sample', sample_info['next'])
                     self.sample_tokens.append(sample_info['token'])
-    
-    @property
-    def dataroot(self):
-        return self.nusc.dataroot
     
     def get_lidar(self, sample_info, nsweeps=1):
         lidar_info = self.nusc.get('sample_data', sample_info['data']['LIDAR_TOP'])
