@@ -134,7 +134,7 @@ class RCNNNet(nn.Module):
                     pts_extra_input_list = [input_data['seg_mask'].unsqueeze(dim=2)]
 
                 if cfg.RCNN.USE_DEPTH:
-                    pts_depth = input_data['pts_depth'] / 70.0 - 0.5
+                    pts_depth = input_data['pts_depth'] / cfg.RCNN.MAX_DEPTH - 0.5
                     pts_extra_input_list.append(pts_depth.unsqueeze(dim=2))
                 pts_extra_input = torch.cat(pts_extra_input_list, dim=2)
 

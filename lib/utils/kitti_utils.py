@@ -159,6 +159,14 @@ def enlarge_box3d(boxes3d, extra_width):
     large_boxes3d[:, 1] += extra_width
     return large_boxes3d
 
+def remove_ground_box3d(boxes3d, ground_height):
+    if isinstance(boxes3d, np.ndarray):
+        short_boxes3d = boxes3d.copy()
+    else:
+        short_boxes3d = boxes3d.clone()
+    short_boxes3d[:, [1, 3]] -= ground_height
+    return short_boxes3d
+
 
 def in_hull(p, hull):
     """

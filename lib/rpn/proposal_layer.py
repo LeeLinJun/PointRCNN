@@ -74,7 +74,8 @@ class ProposalLayer(nn.Module):
         scores_ordered = scores[order]
         proposals_ordered = proposals[order]
 
-        dist = proposals_ordered[:, 2]
+        #dist = proposals_ordered[:, 2] # TODO
+        dist = torch.sqrt(proposals_ordered[:, 0] * proposals_ordered[:, 0] + proposals_ordered[:, 2] * proposals_ordered[:, 2])
         first_mask = (dist > nms_range_list[0]) & (dist <= nms_range_list[1])
         for i in range(1, len(nms_range_list)):
             # get proposal distance mask
