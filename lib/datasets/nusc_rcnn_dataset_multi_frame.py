@@ -7,13 +7,13 @@ from lib.datasets.nusc_dataset import nuScenesDataset
 import lib.utils.kitti_utils as kitti_utils
 from lib.config import cfg
 
-class nuScenesRCNNDataset(nuScenesDataset):
+class nuScenesRCNNDataset_mf(nuScenesDataset):
 
     def __init__(self, nusc, split, mode, subset=False, subset_file=None,
                  subset_fold=4, classes='all', npoints=16384, random_select=True, 
                  logger=None):
         assert mode in ['TRAIN', 'EVAL', 'TEST'], 'Invalid mode: %s' % mode
-        super(nuScenesRCNNDataset, self).__init__(nusc=nusc, split=split)
+        super(nuScenesRCNNDataset_mf, self).__init__(nusc=nusc, split=split)
         
         self.mode = mode
         if classes == 'all':

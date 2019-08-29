@@ -14,7 +14,7 @@ from nuscenes.nuscenes import NuScenes
 
 from lib.net.point_rcnn import PointRCNN
 import lib.net.train_functions as train_functions
-from lib.datasets.nusc_rcnn_dataset_multi_frame import nuScenesRCNNDataset
+from lib.datasets.nusc_rcnn_dataset_multi_frame import nuScenesRCNNDataset_mf
 from lib.config import cfg, cfg_from_file, save_config_to_file
 import tools.train_utils.train_utils as train_utils
 from tools.train_utils.fastai_optim import OptimWrapper
@@ -57,16 +57,16 @@ def create_dataloader(logger):
     nusc = NuScenes(version='v1.0-trainval', dataroot=DATA_PATH, verbose=True)
 
     # create dataloader
-    train_set = nuScenesRCNNDataset(nusc=nusc, npoints=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.SPLIT, mode='TRAIN',
-                                    logger=logger, classes=cfg.CLASSES, subset=cfg.TRAIN.TRAIN_SUBSET,
-                                    subset_file=cfg.TRAIN.TRAIN_SUBSET_FILE, subset_fold=cfg.TRAIN.TRAIN_SUBSET_FOLD)
+    train_set = nuScenesRCNNDataset_mf(nusc=nusc, npoints=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.SPLIT, mode='TRAIN',
+                                       logger=logger, classes=cfg.CLASSES, subset=cfg.TRAIN.TRAIN_SUBSET,
+                                       subset_file=cfg.TRAIN.TRAIN_SUBSET_FILE, subset_fold=cfg.TRAIN.TRAIN_SUBSET_FOLD)
     train_loader = DataLoader(train_set, batch_size=args.batch_size, pin_memory=True,
                               num_workers=args.workers, shuffle=True, collate_fn=train_set.collate_batch,
                               drop_last=True)
 
     if args.train_with_eval:
-        test_set = nuScenesRCNNDataset(nusc=nusc, npoints=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.VAL_SPLIT, mode='EVAL',
-                                       logger=logger, classes=cfg.CLASSES)
+        test_set = nuScenesRCNNDataset_mf(nusc=nusc, npoints=cfg.RPN.NUM_POINTS, split=cfg.TRAIN.VAL_SPLIT, mode='EVAL',
+                                          logger=logger, classes=cfg.CLASSES)
         test_loader = DataLoader(test_set, batch_size=1, shuffle=True, pin_memory=True,
                                  num_workers=args.workers, collate_fn=test_set.collate_batch)
     else:
