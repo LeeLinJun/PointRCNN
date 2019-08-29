@@ -12,4 +12,4 @@ tools/gt_database/
 *ipynb*
 .vscode
 core.*
-
+pointnet2_lib/
