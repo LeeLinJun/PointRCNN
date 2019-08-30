@@ -37,6 +37,7 @@ __C.RPN.ENABLED = True
 __C.RPN.FIXED = False
 
 __C.RPN.USE_INTENSITY = True
+__C.RPN.USE_FRAME_LABEL = False
 
 # config of bin-based loss
 __C.RPN.LOC_XZ_FINE = False

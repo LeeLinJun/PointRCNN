@@ -26,6 +26,7 @@ RPN:
 
     # config of input
     USE_INTENSITY: False
+    USE_FRAME_LABEL: True
 
     # config of bin-based loss
     LOC_XZ_FINE: True
