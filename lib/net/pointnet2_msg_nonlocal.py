@@ -46,7 +46,7 @@ class Pointnet2MSG(nn.Module):
             self.FP_modules.append(
                 PointnetFPModule(mlp=[pre_channel + skip_channel_list[k]] + cfg.RPN.FP_MLPS[k])
             )
-        self.non_local_layer = NoneLocalLayer(input_channels=256,middle_channels=256//2,output_channels=256,bn=True)
+        self.non_local_layer = NonLocalLayer(input_channels=512,middle_channels=512//2,output_channels=512,bn=True)
 
     def _break_up_pc(self, pc):
         xyz = pc[..., 0:3].contiguous()
@@ -58,24 +58,55 @@ class Pointnet2MSG(nn.Module):
         return xyz, features
 
     def forward(self, pointcloud: torch.cuda.FloatTensor):
-        xyz, features = self._break_up_pc(pointcloud)
+        f1 = pointcloud[:,:cfg.RPN.NUM_POINTS,:3]
+        f0 = pointcloud[:,cfg.RPN.NUM_POINTS:,:3]
+        # frame 0
+        xyz_f0, features_f0 = self._break_up_pc(f0)
+        l_xyz_f0, l_features_f0 = [xyz_f0], [features_f0]
+        # frame 1
+        xyz_f1, features_f1 = self._break_up_pc(f1)
+        l_xyz_f1, l_features_f1 = [xyz_f1], [features_f1]
 
-        l_xyz, l_features = [xyz], [features]
         for i in range(len(self.SA_modules)):
-            li_xyz, li_features = self.SA_modules[i](l_xyz[i], l_features[i])
-            l_xyz.append(li_xyz)
-            l_features.append(li_features)
+            #f0
+            li_xyz_f0, li_features_f0 = self.SA_modules[i](l_xyz_f0[i], l_features_f0[i])
+            l_xyz_f0.append(li_xyz_f0)
+            l_features_f0.append(li_features_f0)
+            #f1
+            li_xyz_f1, li_features_f1 = self.SA_modules[i](l_xyz_f1[i], l_features_f1[i])
+            l_xyz_f1.append(li_xyz_f1)
+            l_features_f1.append(li_features_f1)
 
-        counter = 0
-        for i in range(-1, -(len(self.FP_modules) + 1), -1):
-            l_features[i - 1] = self.FP_modules[i](
-                l_xyz[i - 1], l_xyz[i], l_features[i - 1], l_features[i]
+        # for i in range(-1, -(len(self.FP_modules) + 1), -1):
+        for i in range(-1, -(len(self.FP_modules)- 1), -1): #end with i=-2
+            l_features_f0[i - 1] = self.FP_modules[i](
+                l_xyz_f0[i - 1], l_xyz_f0[i], l_features_f0[i - 1], l_features_f0[i]
             )
-            counter += 1
-            if counter ==3:
-                self.non_local_layer()
+            l_features_f1[i - 1] = self.FP_modules[i](
+                l_xyz_f1[i - 1], l_xyz_f1[i], l_features_f1[i - 1], l_features_f1[i]
+            )   
+        fusion_features = self.non_local_layer(
+            torch.cat([l_features_f0[i-1].unsqueeze(2),
+            l_features_f1[i-1].unsqueeze(2)], dim=2)
+            )
+        l_features_f1[i - 1], l_features_f0[i - 1] = fusion_features[:, :, 1, :].contiguous(), fusion_features[:, :, 0, :].contiguous()
+        
+        i -= 1 # i=-3 now
+        l_features_f0[i - 1] = self.FP_modules[i](
+                l_xyz_f0[i - 1], l_xyz_f0[i], l_features_f0[i - 1], l_features_f0[i]
+        )
+        l_features_f1[i - 1] = self.FP_modules[i](
+                l_xyz_f1[i - 1], l_xyz_f1[i], l_features_f1[i - 1], l_features_f1[i]
+        )
 
-        return l_xyz[0], l_features[0]
+        i -= 1 # i=-4 now
+        l_features_f0[i - 1] = self.FP_modules[i](
+                l_xyz_f0[i - 1], l_xyz_f0[i], l_features_f0[i - 1], l_features_f0[i]
+        )
+        l_features_f1[i - 1] = self.FP_modules[i](
+                l_xyz_f1[i - 1], l_xyz_f1[i], l_features_f1[i - 1], l_features_f1[i]
+        )
+        return torch.cat([l_xyz_f1[0],l_xyz_f0[0]],dim=1), torch.cat([l_features_f1[0],l_features_f0[0]],dim=2)
 
 
 class NonLocalLayer(nn.Module):
@@ -84,15 +115,14 @@ class NonLocalLayer(nn.Module):
     def __init__(self, input_channels, middle_channels, output_channels, bn):
         super().__init__()
         # input pointcloud should be in (B,C,T,N)
-        # Conv1d need shape(B,C,N)
-        self.theta = pt_utils.Conv2d(in_size=input_channels,
-                                            out_size = middle_channels, bn=bn)  #(B,C,T,N) -> (B,C/2,T,N)
-        self.phi = pt_utils.Conv2d(in_size=input_channels, out_size = middle_channels, bn=bn) 
-        self.g = pt_utils.Conv2d(in_size=input_channels, out_size = middle_channels, bn=bn) 
+        # Conv1d need shape(B,C,N),Conv2d need shape(B,C,H,W)
+        self.theta = pt_utils.Conv2d(in_size=input_channels, out_size=middle_channels, activation=None, bn=bn)  #(B,C,T,N) -> (B,C/2,T,N)
+        self.phi = pt_utils.Conv2d(in_size=input_channels, out_size=middle_channels, activation=None, bn=bn) #(B,C,T,N) -> (B,C/2,T,N)
+        self.g = pt_utils.Conv2d(in_size=input_channels, out_size=middle_channels, bn=bn) #(B,C,T,N) -> (B,C/2,T,N)
         # recover the channel
-        self.refine = pt_utils.Conv1d(in_size=middle_channels, out_size=output_channels, bn=bn) 
+        self.refine = pt_utils.Conv2d(in_size=middle_channels, out_size=output_channels, bn=bn) #(B,C/2,T,N,) -> (B,C,T,N)
         # softmax
-        self.softmax = torch.nn.Softmax(dim=1)     
+        self.softmax = torch.nn.Softmax(dim=1)
     def forward(self,pc):
         # pc in shape (B,C,T,N)
         B,C,T,N = pc.shape
@@ -100,17 +130,17 @@ class NonLocalLayer(nn.Module):
         theta = self.theta(pc).reshape([B,-1,T*N]).transpose(1,2) #(B,T*N,C/2)
         phi = self.phi(pc).reshape([B,-1,T*N]) #(B,C/2,T*N)
         g = self.g(pc).reshape([B,-1,T*N]).transpose(1,2) #(B,T*N,C/2)
-        #(B,TN,C) x (B,C,TN) -> (B,TN,TN), 0~1 likelyhood along lines
+        #(B,TN,C/2) x (B,C/2,TN) -> (B,TN,TN), 0~1 likelyhood along lines
         corr = self.softmax(torch.bmm(theta,phi))       
-        # attention mul: (B,TN,TN) x (B,TN,C/2) -> (B,TN,C/2) ->(B,C/2,TN)
-        y = torch.bmm(corr,g).transpose(1,2)        
-        # refine and recover channel (B,TN,C/2) ->(B,TN,C) , res structure
-        z= self.refine(y).reshape(B, T, N, -1).permute([0, 3, 1, 2]) + pc
+        # attention mul: (B,TN,TN) x (B,TN,C/2) -> (B,TN,C/2) ->(B,C/2,TN) ->(B,C/2,T,N)
+        y = torch.bmm(corr,g).transpose(1,2).reshape(B,-1, T, N)   
+        # refine and recover channel (B,C/2,T,N) ->(B,C,T,N)  ---+pc---(res structure) -> (B,C,T,N)
+        z= self.refine(y) + pc
         return z
 
-def test_nl():
-    pc = torch.ones([4,128,2,4096]).cuda()
-    model = NonLocalLayer(input_channels=128,middle_channels =128//2,output_channels=128,bn=True).cuda()
-    output = model(pc)
-    return output
+# def test_nl():
+#     pc = torch.ones([4,128,2,4096]).cuda()
+#     model = NonLocalLayer(input_channels=128,middle_channels =128//2,output_channels=128,bn=True).cuda()
+#     output = model(pc)
+#     return output
     

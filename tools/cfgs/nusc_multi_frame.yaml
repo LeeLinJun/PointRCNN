@@ -35,7 +35,7 @@ RPN:
     NUM_HEAD_BIN: 12
 
     # config of network structure
-    BACKBONE: pointnet2_msg
+    BACKBONE: pointnet2_msg_nonlocal #pointnet2_msg #
     USE_BN: True
     NUM_POINTS: 16384
 

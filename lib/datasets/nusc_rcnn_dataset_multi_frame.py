@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from pyquaternion import Quaternion
 from lib.datasets.nusc_dataset import nuScenesDataset
+from lib.datasets.nusc_rcnn_dataset import nuScenesRCNNDataset
 import lib.utils.kitti_utils as kitti_utils
 from lib.config import cfg
 
@@ -175,7 +176,7 @@ class nuScenesRCNNDataset_mf(nuScenesDataset):
         sample_lidar_intensity = np.concatenate((sample_lidar_intensity, sample_lidar_intensity_prev))
         if shuf is None:
             shuf = np.arange(sample_lidar_points.__len__())
-            np.random.shuffle(shuf)
+            #np.random.shuffle(shuf)
         if not flag is None:
             sample_lidar_points = np.hstack((sample_lidar_points,flag))
         sample_lidar_points = sample_lidar_points[shuf]
@@ -196,45 +197,37 @@ class nuScenesRCNNDataset_mf(nuScenesDataset):
     
     @staticmethod
     def prepare_rpn_labels(sample_outputs, rpn_cls_label, rpn_cls_label_prev,
-                           rpn_reg_label, rpn_reg_label_prev, rpn_mot_label, rpn_mot_label_prev,
-                           shuf=None):
+                           rpn_reg_label, rpn_reg_label_prev, shuf=None):
         rpn_cls_label = np.concatenate((rpn_cls_label, rpn_cls_label_prev))
         rpn_reg_label = np.concatenate((rpn_reg_label, rpn_reg_label_prev))
-        rpn_mot_label = np.concatenate((rpn_mot_label, rpn_mot_label_prev))
         if shuf is None:
             shuf = np.arange(rpn_cls_label.__len__())
-            np.random.shuffle(shuf)
+            #np.random.shuffle(shuf)
         rpn_cls_label = rpn_cls_label[shuf]
         rpn_reg_label = rpn_reg_label[shuf]
-        rpn_mot_label = rpn_mot_label[shuf]
 
-        sample_outputs['rpn_cls_label'] = rpn_cls_label.astype(np.int32)
+        sample_outputs['rpn_cls_label'] = rpn_cls_label.astype(np.float32)
         sample_outputs['rpn_reg_label'] = rpn_reg_label.astype(np.float32)
-        sample_outputs['rpn_mot_label'] = rpn_mot_label.astype(np.int32)
 
         return sample_outputs
     
     @staticmethod
     def prepare_gt(sample_outputs, sample_ann_bboxes, sample_ann_bboxes_prev,
-                   sample_ann_labels, sample_ann_labels_prev, sample_ann_motion,
-                   sample_ann_motion_prev):
+                   sample_ann_labels, sample_ann_labels_prev):
         gt_frame = np.concatenate((np.ones(sample_ann_bboxes.__len__()), np.zeros(sample_ann_bboxes_prev.__len__())))
         sample_ann_bboxes = np.concatenate((sample_ann_bboxes, sample_ann_bboxes_prev))
         sample_ann_labels = np.concatenate((sample_ann_labels, sample_ann_labels_prev))
-        sample_ann_motion = np.concatenate((sample_ann_motion, sample_ann_motion_prev))
         
         shuf = np.arange(sample_ann_bboxes.__len__())
         np.random.shuffle(shuf)
         sample_ann_bboxes = sample_ann_bboxes[shuf]
         sample_ann_labels = sample_ann_labels[shuf]
-        sample_ann_motion = sample_ann_motion[shuf]
         gt_frame = gt_frame[shuf]
 
         sample_outputs['gt_boxes3d'] = sample_ann_bboxes.astype(np.float32)
         sample_outputs['gt_label'] = sample_ann_labels.astype(np.int32)
-        sample_outputs['gt_motion'] = sample_ann_motion.astype(np.int32)
         sample_outputs['gt_frame'] = gt_frame.astype(np.int32)
-        
+
         return sample_outputs
     
     def get_rpn_sample(self, sample_info):
@@ -278,19 +271,6 @@ class nuScenesRCNNDataset_mf(nuScenesDataset):
         sample_ann_infos = self.filterate_anns(self.get_anns(sample_info))
         sample_ann_infos_prev = self.filterate_anns(self.get_anns(sample_info_prev))
 
-        # get instance motion
-        sample_ann_motion = np.zeros(len(sample_ann_infos))
-        sample_ann_motion_prev = np.zeros(len(sample_ann_infos_prev))
-        for i, ann_info in enumerate(sample_ann_infos):
-            for j, ann_info_prev in enumerate(sample_ann_infos_prev):
-                if ann_info['instance_token'] == ann_info_prev['instance_token']:
-                    dx = np.array(ann_info['translation']) - np.array(ann_info_prev['translation'])
-                    dx = np.linalg.norm(dx)
-                    if dx > 0.25:
-                        sample_ann_motion[i] = 1
-                        sample_ann_motion_prev[j] = 1
-                    break
-
         # annotation translate
         sample_ann_infos = self.ann_trans(sample_ann_infos, sample_lidar_ep_info)
         sample_ann_infos_prev = self.ann_trans(sample_ann_infos_prev, sample_lidar_ep_info)
@@ -305,33 +285,31 @@ class nuScenesRCNNDataset_mf(nuScenesDataset):
                 self.data_augmentation([sample_lidar_points, sample_lidar_points_prev], [sample_ann_bboxes, sample_ann_bboxes_prev])
             sample_outputs['aug_method'] = aug_method
         
+        
         # merge frames
         shuf = np.arange(sample_lidar_points.__len__() + sample_lidar_points_prev.__len__())
         np.random.shuffle(shuf)
-        
+
         flag = np.zeros([sample_lidar_points.__len__() + sample_lidar_points_prev.__len__(),2])
         flag[:sample_lidar_points.__len__(),0]=1
         flag[sample_lidar_points.__len__():,1]=1
         
         if not cfg.RPN.FIXED:
-            rpn_cls_label, rpn_reg_label, rpn_mot_label = self.generate_rpn_training_labels(sample_lidar_points, sample_ann_bboxes, sample_ann_labels, sample_ann_motion)
-            rpn_cls_label_prev, rpn_reg_label_prev, rpn_mot_label_prev = self.generate_rpn_training_labels(sample_lidar_points_prev, sample_ann_bboxes_prev, sample_ann_labels_prev, sample_ann_motion_prev)
+            rpn_cls_label, rpn_reg_label = self.generate_rpn_training_labels(sample_lidar_points, sample_ann_bboxes, sample_ann_labels)
+            rpn_cls_label_prev, rpn_reg_label_prev = self.generate_rpn_training_labels(sample_lidar_points_prev, sample_ann_bboxes_prev, sample_ann_labels_prev)
             sample_outputs = self.prepare_rpn_labels(sample_outputs, rpn_cls_label, rpn_cls_label_prev,
-                                                     rpn_reg_label, rpn_reg_label_prev, rpn_mot_label, rpn_mot_label_prev,
-                                                     shuf=shuf)
+                                                     rpn_reg_label, rpn_reg_label_prev, shuf=None)
 
         sample_outputs = self.prepare_pts_outputs(sample_outputs, sample_lidar_points, sample_lidar_points_prev,
-                                                  sample_lidar_intensity, sample_lidar_intensity_prev, shuf=shuf,flag=flag)
+                                                  sample_lidar_intensity, sample_lidar_intensity_prev, shuf=None,flag=None)
         sample_outputs = self.prepare_gt(sample_outputs, sample_ann_bboxes, sample_ann_bboxes_prev,
-                                         sample_ann_labels, sample_ann_labels_prev, sample_ann_motion,
-                                         sample_ann_motion_prev)
+                                         sample_ann_labels, sample_ann_labels_prev)
 
         return sample_outputs
     
     @staticmethod
-    def generate_rpn_training_labels(points, bboxes, labels, motion):
+    def generate_rpn_training_labels(points, bboxes, labels):
         cls_label = np.zeros((points.__len__()))
-        mot_label = np.zeros((points.__len__()))
         reg_label = np.zeros((points.__len__(), 7))
         shrink_bboxes = kitti_utils.remove_ground_box3d(bboxes, ground_height=0.05)
         shrink_corners = kitti_utils.boxes3d_to_corners3d(shrink_bboxes)
@@ -342,8 +320,6 @@ class nuScenesRCNNDataset_mf(nuScenesDataset):
             fg_pt_flag = kitti_utils.in_hull(points, box_corners) # (N,)
             fg_points = points[fg_pt_flag] # (M, 3)
             cls_label[fg_pt_flag] = labels[k] # (N,)
-            if motion[k] == 1:
-                mot_label[fg_pt_flag] = 1
 
             # enlarge the bbox3d, ignore nearby points
             #extend_box_corners = extend_corners[k]
@@ -359,7 +335,7 @@ class nuScenesRCNNDataset_mf(nuScenesDataset):
             # size and angle encoding
             reg_label[fg_pt_flag, 3:] = bboxes[k][3:]
 
-        return cls_label, reg_label, mot_label
+        return cls_label, reg_label
     
     def data_augmentation(self, points, bboxes, mustaug=False):
         """
